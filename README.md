@@ -1,35 +1,60 @@
 # Hierarchical Legion Transform
 
-This is a reference implementation of a hierarchical transform system,
-implemented in [Legion](https://github.com/TomGillen/legion). It is based
-heavily on the [Amethyst Core
-implementation](https://github.com/amethyst/amethyst/tree/master/amethyst_core/src/transform)
-with the actual `Transform` struct being identical.
-
-See: https://community.amethyst.rs/t/legion-ecs-discussion/965/59
+This is the experimental ECS-based hierarchy branch.
 
 ## How It Works
 
-Much like the `specs` based Amethyst implementation, a `Transform` is a struct
-containing an isometry and a scale, along with a global matrix that is updated
-by the `TransformSystem`. A `Parent` is simply a struct containing nothing but
-an `Entity` which is a handle to the parent Entity. In Legion `Parent` is stored
-as a `Tag` on the Entity.
+The hierarchy is all implemented in a single ECS component, defined as:
 
-The update systems works in two passes: it first generates a forest of transform
-hierarchies that need to be recomputed, then processes the forest in parallel.
-Each tree must be processed from top to bottom (either breadth or depth first)
-as the parent global transform affects all of it's descendants.
+```rust
+pub struct Hierarchy {
+  // The parent of this Entity, if any.
+  parent: Option<Entity>,
+
+  // The first child of this entity, if any. Children are kept in a circular
+  // doubly-linked list via `siblings`. With a single child, that child will
+  // have `None` for it's `siblings`.
+  first_child: Option<Entity>,
+
+  // Forms a circular doubly-linked list of siblings. None if this Entity has no
+  // siblings, and both point to the same entity if it has only 1 sibling.
+  siblings: Option<(Entity, Entity)>,
+}
+```
+
+All mutations to the hierarchy are made via static helpers in `Hierarchy`, for
+example;
+
+```rust
+// Add 2 children, `e1` and `e2` to the parent entity `parent`.
+Hierarchy::set_parent_entity(&mut world, e1, parent);
+Hierarchy::set_parent_entity(&mut world, e2, parent);
+
+// Remove just `e1` from the parent.
+Hierarchy::un_parent_entity(&mut world, e1);
+```
+
+## Invariant
+
+It is invalid to delete an entity that is a part of a hierarchy without first
+calling `hierarchy::un_parent_entity(...)` on it and all it's children.
+
+This restrictions can be lifted, but probably shouldn't be as it would leave the
+hierarchy in a partially-broken state until the next maintenance cycle and add
+extra runtime-checks. Instead the Legion `World::delete` should be wrapped to
+correctly handle hierarchies.
 
 ## Todo:
 
-- [x] Detect and handle changes to `Transform` values
-- [x] Detect and handle changes to `Transform` hierarchy layout.
-- [x] Build a forest of (independent) transform hierarchies that need to be
-      updated.
-- [x] Re-compute `global_matrix` for `Transform` with and without parents.
-- [ ] Add parallel support to computation (currently runtime throwing because of
-      multiple mutable borrows).
-- [ ] Consider how to handle Scaling (and double check that it's done
-      correctly).
-- [x] Unit test re-parenting and un-parenting.
+- [x] Implement a hierarchy in pure-ECS (no non-ECS allocations).
+- [x] Handle adding entities to the hierarchy.
+- [x] Handle removing entities from the hierarchy.
+- [x] Handle tracking depth for entities that can then be used to Tag the entity
+      for parallel Transform processing.
+- [ ] Implement a POC Transform update system that will:
+  - [ ] Walk down the dirty parts of the tree to re-tag depth changes and mark
+        them as modified so they will be picked up in the next step.
+  - [ ] Compute the `GlobalMatrix` for any entity with a modified
+        `LocalTransform`.
+  - [ ] Compute the `GlobalMatrix` for any entity that moved as a result of a
+        hierarchy change.

@@ -1,6 +1,4 @@
-//! Components for the transform processor.
+use crate::math::{Similarity3, Matrix4};
 
-pub use self::{parent::Parent, transform::Transform};
-
-mod parent;
-mod transform;
+pub type LocalTransform = Similarity3<f32>;
+pub struct GlobalTransform(Matrix4<f32>);
